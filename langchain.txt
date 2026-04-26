@@ -1,0 +1,7 @@
+1 .reloading the same summary , of different
+2. vDB persist
+3.multiple document compare sbi ins vs tata aig
+4. continues chat , history
+5. 4-5 lines prompt for laymmal lang ,  if 404 in doc
+6. suggestion of counter question , summarize in 1 paragraph
+Page index when, doc is in multiple pages and vector db for single page

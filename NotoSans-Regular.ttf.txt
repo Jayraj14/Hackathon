@@ -1,0 +1,1 @@
+pdfmetrics.registerFont(TTFont('NotoSans', 'NotoSans-Regular.ttf'))
