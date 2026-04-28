@@ -51,3 +51,10 @@ tempfile — standard library module for creating temporary files (used to save 
 os — standard library OS utilities (used for env vars).
 
 httpx — an HTTP client used to supply a custom HTTP client to the LLM/embeddings clients and to set verify=False
+
+
+PIP INSTALLS required:
+pip install streamlit pdfminer.six langchain langchain-openai langchain-community chromadb reportlab python-dotenv httpx
+
+Run the code using streamlit:
+streamlit run Sample_code_3.py 
