@@ -1,0 +1,120 @@
+# ── GREETING ─────────────────────────────────────────────
+
+define flow greet patient
+  user express greeting
+  bot express greeting
+  bot ask how can i help
+
+define user express greeting
+  "hello"
+  "hi"
+  "hey"
+  "good morning"
+  "good afternoon"
+  "good evening"
+
+define bot express greeting
+  "Hello! I am your Patient Education Assistant."
+
+define bot ask how can i help
+  "How can I help you understand your health report or medical document today?"
+
+
+# ── SUMMARY ──────────────────────────────────────────────
+
+define flow explain report
+  user ask summary
+  bot respond summary
+
+define user ask summary
+  "summarise my report"
+  "summary"
+  "what does my report say"
+  "explain my document"
+  "overview of report"
+  "tell me about my health report"
+
+define bot respond summary
+  "I will analyze your uploaded document and provide a simple explanation."
+
+
+# ── CONDITIONS / FINDINGS ───────────────────────────────
+
+define flow explain findings
+  user ask findings
+  bot respond findings
+
+define user ask findings
+  "what do my results mean"
+  "lab results"
+  "test report explanation"
+  "what is written in my report"
+  "findings meaning"
+
+define bot respond findings
+  "I will extract and explain the findings from your document in simple terms."
+
+
+# ── MEDICAL TERMS HELP ───────────────────────────────────
+
+define flow explain terms
+  user ask medical terms
+  bot respond terms
+
+define user ask medical terms
+  "what does this mean"
+  "explain term"
+  "meaning of diagnosis"
+  "medical term explanation"
+
+define bot respond medical terms
+  "I will simplify the medical terms from your document."
+
+
+# ── NEXT STEPS ───────────────────────────────────────────
+
+define flow next steps
+  user ask next steps
+  bot respond next steps
+
+define user ask next steps
+  "what should i do next"
+  "treatment plan"
+  "next steps"
+  "what is recommended"
+
+define bot respond next steps
+  "I will extract recommendations or next steps from your report."
+
+
+# ── OFF TOPIC ─────────────────────────────────────────────
+
+define flow off topic
+  user ask off topic
+  bot refuse off topic
+
+define user ask off topic
+  "tell me a joke"
+  "weather"
+  "news"
+  "stock price"
+  "movie recommendation"
+  "write code"
+
+define bot refuse off topic
+  "I can only help you with understanding your medical or health documents."
+
+
+# ── FALLBACK ─────────────────────────────────────────────
+
+define flow fallback
+  user unknown question
+  bot fallback answer
+
+define user unknown question
+  "something else"
+  "not sure"
+  "random question"
+
+define bot fallback answer
+  "I will try to answer based on your uploaded document. If not available, I will let you know."
