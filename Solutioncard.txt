@@ -1,0 +1,94 @@
+1. Solution Objective
+The problem this solution addresses: Patients often struggle to understand complex medical or healthcare PDF reports and require simplified, contextual, and empathetic explanations along with interactive querying.
+The target users or systems: Patients, caregivers, and healthcare support staff needing easy-to-understand summaries and Q&A from medical documents.
+The expected business or technical outcome: A multilingual AI assistant that extracts, summarizes, and explains PDF-based health documents, enabling better comprehension, improved patient engagement, and on-demand document querying through conversational AI.
+2. Solution Overview / Design
+
+The solution is a Streamlit-based RAG (Retrieval-Augmented Generation) system that processes uploaded PDF medical documents and enables summarization + conversational Q&A.
+
+Architecture flow:
+
+PDF Upload
+   ↓
+PDF Text Extraction (pdfminer)
+   ↓
+Text Sanitization (safety & neutrality layer)
+   ↓
+Text Chunking (RecursiveCharacterTextSplitter)
+   ↓
+Embeddings (OpenAI Embeddings via GenAI Lab)
+   ↓
+Vector Store (Chroma DB)
+   ↓
+Retriever (Top-K relevant chunks)
+   ↓
+LLM (ChatOpenAI via TCS GenAI endpoint)
+   ↓
+Report Generation + Chat Q&A
+   ↓
+PDF Export (ReportLab)
+
+Key design decisions:
+
+RAG ensures answers are grounded strictly in document context.
+Sanitization layer reduces sensitive or unsafe medical/gendered terms.
+Session state maintains chat history and document persistence.
+Multilingual output support improves accessibility.
+Lightweight Streamlit UI enables rapid deployment.
+3. Tech Stack
+
+Frontend:
+
+Framework: Streamlit
+UI Components: Text input, file uploader, chat interface, download button
+State Management: Streamlit session state
+
+Backend:
+
+Framework: Python-based service logic
+Programming Language: Python
+AI/ML: LangChain, ChatOpenAI (TCS GenAI LLM), OpenAI Embeddings
+Vector Store: Chroma DB
+Database: In-memory / local vector persistence (Chroma)
+Tools: pdfminer, ReportLab, httpx, dotenv, regex sanitization
+
+Agentic Nature:
+The system follows a Retrieval-Augmented Generation (RAG) pipeline with a conversational QA loop. It is semi-agentic in behavior, dynamically retrieving context, generating grounded responses, and iteratively answering user queries based on document memory.
+
+4. Data
+
+The system uses user-uploaded PDF documents containing healthcare or patient-related reports. The data is unstructured text extracted using PDF parsing. It typically includes medical summaries, observations, and informational content. After extraction, the text is chunked into smaller semantic segments and embedded into a vector database (Chroma). No external dataset is used; all knowledge is derived from the uploaded document content.
+
+5. Inputs and Outputs
+
+Input:
+
+PDF documents containing healthcare or patient information
+Text-based user queries in natural language
+Input source: user upload and chat interface
+Format constraints: readable PDF text, non-encrypted files
+
+Outputs:
+
+Structured patient report summary generated from document context
+Context-aware answers to user questions
+Multilingual responses (English, Hindi, Marathi)
+Downloadable PDF report including Q&A
+Output format: text + downloadable PDF file
+Outputs are consumed by patients or caregivers for understanding medical content
+6. Solution Highlights
+Full RAG-based architecture ensuring context-grounded responses
+Intelligent PDF parsing and chunking for better retrieval accuracy
+Safety-oriented text sanitization layer reducing sensitive bias and risky interpretations
+Multilingual support for wider accessibility
+Persistent chat history for continuous interaction
+Seamless PDF export for offline usage
+Lightweight and fast Streamlit deployment with minimal infrastructure needs
+Modular design allowing easy extension to other document domains
+7. Limitations & Risks
+Performance depends on quality and structure of uploaded PDFs
+Responses are strictly context-bound; missing data leads to "I don't know" outputs
+Sanitization may oversimplify medically important terms
+Not validated for clinical or diagnostic decision-making
+Vector retrieval may miss highly nuanced or implicit information
+Requires stable API access to TCS GenAI endpoints
