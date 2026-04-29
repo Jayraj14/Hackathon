@@ -13,65 +13,31 @@ import tempfile, os, re, hashlib
 from dotenv import load_dotenv
 import httpx
 
+# ---------------------------
+# INIT
+# ---------------------------
 load_dotenv()
 client = httpx.Client(verify=False)
-
 os.environ["TIKTOKEN_CACHE_DIR"] = "token"
 
+st.set_page_config(page_title="AI Patient Assistant", layout="wide")
+st.title("🧠 AI Patient Education Assistant")
 
-# =========================
-# 🔥 STRONG DOCUMENT FILTER
-# =========================
-def is_medical_document(text):
-    text = text.lower()
-
-    medical_signals = [
-        "hemoglobin", "platelet", "wbc", "rbc",
-        "blood pressure", "glucose", "cholesterol",
-        "diagnosis", "symptom", "prescription",
-        "lab report", "pathology", "radiology",
-        "patient", "clinical", "treatment",
-        "hospital", "doctor", "medical", "disease",
-        "report", "test", "scan"
-    ]
-
-    non_medical_signals = [
-        "farming", "agriculture", "crop", "soil",
-        "fertilizer", "irrigation", "harvest",
-        "tractor", "livestock", "cultivation",
-        "commodity", "market price", "weather report"
-    ]
-
-    pos = sum(1 for w in medical_signals if w in text)
-    neg = sum(1 for w in non_medical_signals if w in text)
-
-    # 🚫 instantly block farming/agri documents
-    if neg >= 2:
-        return False
-
-    # ✅ strict medical threshold
-    return pos >= 5
-
-
-# =========================
-# SANITIZER
-# =========================
+# ---------------------------
+# HELPERS (SAFE FOR UI ONLY)
+# ---------------------------
 def sanitize_text(text):
     replacements = {
         r'\bfemale\b': 'individual',
         r'\bmale\b': 'individual',
-        r'\bpatient\b': 'person',
-        r'\bdoctor\b': 'health professional',
-        r'\bprescription\b': 'recommendation',
+        r'\bshe\b': 'the person',
+        r'\bhe\b': 'the person',
+        r'\bpatient\b': 'person'
     }
     for pattern, replacement in replacements.items():
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     return text
 
-
-# =========================
-# MEDICAL SIMPLIFIER
-# =========================
 def simplify_medical_terms(text):
     replacements = {
         r'\bhypertension\b': 'high blood pressure',
@@ -84,17 +50,57 @@ def simplify_medical_terms(text):
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     return text
 
+def is_medical_document(text):
+    keywords = [
+        "diagnosis","treatment","medication","patient",
+        "ICD","blood","pressure","cholesterol",
+        "hypertension","glucose","mg","doctor",
+        "ECG","EKG","clinical"
+    ]
+    text = text.lower()
+    score = sum(word in text for word in keywords)
+    return score >= 3
 
-# =========================
-# UI CONFIG
-# =========================
-st.set_page_config(page_title="AI Patient Assistant", layout="wide")
-st.title("🧠 AI Patient Education Assistant")
+def extract_lab_values(text):
+    patterns = {
+        "Hemoglobin": (r"hemoglobin[:\s]*([\d.]+)", 13, 17),
+        "WBC": (r"wbc[:\s]*([\d.]+)", 4000, 11000),
+        "RBC": (r"rbc[:\s]*([\d.]+)", 4.5, 5.9),
+        "Platelets": (r"platelet[s]*[:\s]*([\d.]+)", 150000, 450000),
+        "Glucose": (r"glucose[:\s]*([\d.]+)", 70, 140),
+        "Cholesterol": (r"cholesterol[:\s]*([\d.]+)", 125, 200),
+    }
 
+    results = []
 
-# =========================
-# MODELS
-# =========================
+    for name, (pattern, low, high) in patterns.items():
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            value = float(match.group(1))
+
+            if value < low:
+                status = "Low"
+                color = "red"
+            elif value > high:
+                status = "High"
+                color = "orange"
+            else:
+                status = "Normal"
+                color = "green"
+
+            results.append({
+                "name": name,
+                "value": value,
+                "status": status,
+                "color": color,
+                "range": f"{low}-{high}"
+            })
+
+    return results
+
+# ---------------------------
+# MODEL
+# ---------------------------
 @st.cache_resource
 def load_models():
     llm = ChatOpenAI(
@@ -110,87 +116,66 @@ def load_models():
         api_key=os.getenv("API_KEY"),
         http_client=client
     )
-    return llm, embeddings
 
+    return llm, embeddings
 
 llm, embedding_model = load_models()
 
-
-# =========================
+# ---------------------------
 # SESSION STATE
-# =========================
-for key in ["vectordb", "report", "chat_history", "retriever", "file_hash"]:
-    if key not in st.session_state:
-        st.session_state[key] = None if key != "chat_history" else []
+# ---------------------------
+if "vectordb" not in st.session_state:
+    st.session_state.vectordb = None
+    st.session_state.report = None
+    st.session_state.raw_text = None
+    st.session_state.chat_history = []
 
-
-# =========================
-# LANGUAGE
-# =========================
-language = st.selectbox("🌍 Language", ["English", "Hindi", "Marathi"])
-
-
-# =========================
-# FILE UPLOAD
-# =========================
-uploaded_file = st.file_uploader("📤 Upload PDF", type="pdf")
+# ---------------------------
+# UPLOAD
+# ---------------------------
+uploaded_file = st.file_uploader("📤 Upload Medical PDF", type="pdf")
 
 if uploaded_file:
 
     file_bytes = uploaded_file.getvalue()
-    file_hash = hashlib.md5(file_bytes).hexdigest()
 
-    if file_hash != st.session_state.file_hash:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(file_bytes)
+        pdf_path = tmp.name
 
-        st.session_state.file_hash = file_hash
-        st.session_state.vectordb = None
-        st.session_state.report = None
-        st.session_state.chat_history = []
+    # ✅ RAW TEXT (DO NOT MODIFY)
+    raw_text = extract_text(pdf_path) or ""
+    st.session_state.raw_text = raw_text
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(file_bytes)
-            pdf_path = tmp.name
+    if not raw_text.strip():
+        st.error("No readable content in PDF")
+        st.stop()
 
-        raw_text = extract_text(pdf_path)
-        raw_text = sanitize_text(raw_text or "")
+    # ✅ MEDICAL CHECK
+    if not is_medical_document(raw_text):
+        st.error("❌ This does not appear to be a medical document")
+        st.stop()
 
-        # =========================
-        # 🚫 BLOCK NON-MEDICAL DOCS
-        # =========================
-        if not raw_text.strip():
-            st.error("Empty PDF uploaded")
-            st.stop()
+    # ---------------------------
+    # VECTOR DB (RAW TEXT ONLY)
+    # ---------------------------
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    chunks = splitter.split_text(raw_text)
 
-        if not is_medical_document(raw_text):
-            st.error("❌ Only MEDICAL patient reports are allowed. Non-medical document detected.")
-            st.stop()
+    vectordb = Chroma.from_texts(chunks, embedding_model)
+    retriever = vectordb.as_retriever(search_kwargs={"k": 4})
 
-        # =========================
-        # VECTOR STORE
-        # =========================
-        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        chunks = splitter.split_text(raw_text)
+    st.session_state.vectordb = vectordb
 
-        vectordb = Chroma.from_texts(chunks, embedding_model)
-        retriever = vectordb.as_retriever(search_kwargs={"k": 4})
-
-        st.session_state.vectordb = vectordb
-        st.session_state.retriever = retriever
-
-
-# =========================
-# REPORT GENERATION
-# =========================
-if st.session_state.vectordb and st.session_state.report is None:
-
-    retriever = st.session_state.retriever
-
+    # ---------------------------
+    # REPORT GENERATION
+    # ---------------------------
     prompt = ChatPromptTemplate.from_template("""
-You are a medical education assistant.
+You are an empathetic healthcare assistant.
 
-Explain the patient report in simple terms.
+Explain this medical report in simple terms.
 
-Answer in {language}
+Answer clearly.
 
 Context:
 {context}
@@ -199,49 +184,62 @@ Context:
     chain = create_stuff_documents_chain(llm, prompt)
     docs = retriever.get_relevant_documents("summary")
 
-    result = chain.invoke({
-        "context": docs,
-        "language": language
-    })
+    result = chain.invoke({"context": docs})
 
-    st.session_state.report = simplify_medical_terms(str(result))
+    # ✅ SANITIZE ONLY FOR DISPLAY
+    final_report = simplify_medical_terms(sanitize_text(str(result)))
+    st.session_state.report = final_report
 
-
-# =========================
+# ---------------------------
 # DISPLAY REPORT
-# =========================
+# ---------------------------
 if st.session_state.report:
-    st.subheader("📘 Patient Report")
+    st.subheader("📘 Patient-Friendly Report")
     st.write(st.session_state.report)
 
+# ---------------------------
+# 🧪 LAB ANALYSIS (BEST VERSION)
+# ---------------------------
+text_for_analysis = ""
 
-# =========================
+if st.session_state.vectordb:
+    try:
+        docs = st.session_state.vectordb._collection.get()['documents']
+        text_for_analysis = " ".join(docs)
+    except:
+        text_for_analysis = st.session_state.raw_text
+else:
+    text_for_analysis = st.session_state.raw_text
+
+if text_for_analysis:
+    lab_results = extract_lab_values(text_for_analysis)
+
+    if lab_results:
+        st.subheader("🧪 Lab Value Analysis")
+
+        for lab in lab_results:
+            st.markdown(
+                f"**{lab['name']}**: {lab['value']} "
+                f"(<span style='color:{lab['color']}'>{lab['status']}</span>) "
+                f"(Normal: {lab['range']})",
+                unsafe_allow_html=True
+            )
+# ---------------------------
 # CHAT
-# =========================
+# ---------------------------
 if st.session_state.vectordb:
 
-    st.divider()
-    st.subheader("💬 Chat")
+    st.subheader("💬 Ask Questions")
+    user_input = st.text_input("Type your question")
 
-    for msg in st.session_state.chat_history:
-        st.markdown(f"🧑 {msg['question']}")
-        st.markdown(f"🤖 {msg['answer']}")
-        st.divider()
+    if st.button("Ask") and user_input:
 
-    user_input = st.text_input("Ask question:")
+        retriever = st.session_state.vectordb.as_retriever()
 
-    if st.button("Ask") and user_input.strip():
-
-        retriever = st.session_state.retriever
         docs = retriever.get_relevant_documents(user_input)
 
-        if not docs:
-            answer = "No relevant medical information found."
-        else:
-            qa_prompt = ChatPromptTemplate.from_template("""
-Answer ONLY from medical context.
-
-Answer in {language}
+        qa_prompt = ChatPromptTemplate.from_template("""
+Answer ONLY from the context.
 
 Context:
 {context}
@@ -250,54 +248,35 @@ Question:
 {input}
 """)
 
-            chain = create_stuff_documents_chain(llm, qa_prompt)
+        chain = create_stuff_documents_chain(llm, qa_prompt)
 
-            answer = chain.invoke({
-                "context": docs,
-                "input": user_input,
-                "language": language
-            })
-
-        answer = simplify_medical_terms(str(answer))
-
-        st.session_state.chat_history.append({
-            "question": user_input,
-            "answer": answer
+        answer = chain.invoke({
+            "context": docs,
+            "input": user_input
         })
 
-        st.rerun()
+        answer = simplify_medical_terms(sanitize_text(str(answer)))
 
+        st.write("🤖", answer)
 
-# =========================
+# ---------------------------
 # PDF EXPORT
-# =========================
-def generate_pdf(report, q=None, a=None):
+# ---------------------------
+def generate_pdf(report):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer)
     styles = getSampleStyleSheet()
 
     content = [Paragraph("Patient Report", styles["Title"]), Spacer(1, 10)]
 
-    for line in (report or "").split("\n"):
+    for line in report.split("\n"):
         content.append(Paragraph(line, styles["Normal"]))
         content.append(Spacer(1, 5))
-
-    if q and a:
-        content.append(Spacer(1, 10))
-        content.append(Paragraph("Q&A", styles["Title"]))
-        content.append(Paragraph(f"Q: {q}", styles["Normal"]))
-        content.append(Paragraph(f"A: {a}", styles["Normal"]))
 
     doc.build(content)
     buffer.seek(0)
     return buffer
 
-
 if st.session_state.report:
-    pdf = generate_pdf(
-        st.session_state.report,
-        None,
-        None
-    )
-
-    st.download_button("📥 Download PDF", pdf, file_name="patient_report.pdf")
+    pdf = generate_pdf(st.session_state.report)
+    st.download_button("📥 Download PDF", pdf, file_name="report.pdf")
