@@ -6,7 +6,9 @@ from langchain_community.vectorstores import Chroma
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 from io import BytesIO
 import tempfile, os, re
@@ -24,7 +26,23 @@ st.set_page_config(page_title="AI Insurance Policy Assistant", layout="wide")
 st.title("📄 AI Insurance Policy Summarizer")
 
 # ---------------------------
-# INSURANCE TEXT SIMPLIFIER
+# LANGUAGE SELECTION
+# ---------------------------
+language = st.selectbox("🌍 Language", ["English", "Hindi"])
+
+# ---------------------------
+# REGISTER HINDI FONT (IMPORTANT)
+# ---------------------------
+FONT_PATH = "NotoSansDevanagari-Regular.ttf"
+
+if os.path.exists(FONT_PATH):
+    pdfmetrics.registerFont(TTFont("Devanagari", FONT_PATH))
+    HINDI_FONT = "Devanagari"
+else:
+    HINDI_FONT = "Helvetica"
+
+# ---------------------------
+# POLICY SIMPLIFIER
 # ---------------------------
 def simplify_policy_terms(text):
     replacements = {
@@ -45,40 +63,41 @@ def simplify_policy_terms(text):
 
 
 # ---------------------------
-# POLICY CLAUSE EXTRACTOR (REPLACES LAB ANALYZER)
+# POLICY VALIDATION
+# ---------------------------
+# ---------------------------
+# POLICY VALIDATION (LLM-BASED)
+# ---------------------------
+def is_insurance_document_llm(text, llm):
+    prompt = f"""
+You are a document classifier.
+
+Return ONLY YES or NO.
+
+Is this an insurance policy document?
+
+Text:
+{text[:3000]}
+"""
+
+    result = llm.invoke(prompt).content.lower()
+    return "yes" in result
+
+
+# ---------------------------
+# POLICY INSIGHTS (LAB ANALYZER REPLACEMENT)
 # ---------------------------
 def extract_policy_clauses(text):
     clauses = {
-        "Exclusions": ["not covered", "exclusion", "does not cover", "excluded"],
+        "Exclusions": ["not covered", "exclusion", "does not cover"],
         "Waiting Period": ["waiting period", "after 30 days", "after 90 days"],
-        "Coverage": ["covered", "coverage includes", "benefits include"],
+        "Coverage": ["covered", "benefits include"],
         "Deductible": ["deductible", "out of pocket"],
-        "Claim Rules": ["claim", "claim process", "submit documents"]
+        "Claim Process": ["claim", "documents", "submit"]
     }
 
-    results = []
-
-    text_lower = text.lower()
-
-    for clause, keywords in clauses.items():
-        if any(k in text_lower for k in keywords):
-            results.append(clause)
-
-    return results
-
-
-# ---------------------------
-# SIMPLE POLICY CHECK (instead of medical check)
-# ---------------------------
-def is_insurance_document(text):
-    keywords = [
-        "policy", "insurance", "premium", "coverage",
-        "claim", "benefit", "exclusion", "deductible",
-        "insured", "sum assured"
-    ]
     text = text.lower()
-    score = sum(word in text for word in keywords)
-    return score >= 3
+    return [c for c, keys in clauses.items() if any(k in text for k in keys)]
 
 
 # ---------------------------
@@ -108,14 +127,13 @@ llm, embedding_model = load_models()
 # ---------------------------
 # SESSION STATE
 # ---------------------------
-if "vectordb" not in st.session_state:
-    st.session_state.vectordb = None
-    st.session_state.report = None
-    st.session_state.raw_text = None
-    st.session_state.chat_history = []
+for k in ["vectordb", "report", "raw_text"]:
+    if k not in st.session_state:
+        st.session_state[k] = None
+
 
 # ---------------------------
-# UPLOAD PDF
+# UPLOAD
 # ---------------------------
 uploaded_file = st.file_uploader("📤 Upload Insurance Policy PDF", type="pdf")
 
@@ -132,16 +150,10 @@ if uploaded_file:
         st.error("No readable content found")
         st.stop()
 
-    # ---------------------------
-    # POLICY VALIDATION
-    # ---------------------------
-    if not is_insurance_document(raw_text):
-        st.error("❌ This does not look like an insurance policy document")
+    if not is_insurance_document_llm(raw_text, llm):
+        st.error("❌ Not a valid insurance policy document")
         st.stop()
 
-    # ---------------------------
-    # VECTOR DB
-    # ---------------------------
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = splitter.split_text(raw_text)
 
@@ -151,19 +163,18 @@ if uploaded_file:
     st.session_state.vectordb = vectordb
 
     # ---------------------------
-    # POLICY SUMMARY
+    # PROMPT (HINDI ENABLED)
     # ---------------------------
     prompt = ChatPromptTemplate.from_template("""
 You are an Insurance Policy Expert.
 
-Explain this insurance policy in simple terms.
+Explain the policy clearly in {language}.
 
 Focus on:
 - Coverage
 - Exclusions
 - Premium
 - Claim process
-- Hidden conditions
 
 Context:
 {context}
@@ -172,9 +183,13 @@ Context:
     chain = create_stuff_documents_chain(llm, prompt)
     docs = retriever.get_relevant_documents("summary")
 
-    result = chain.invoke({"context": docs})
+    result = chain.invoke({
+        "context": docs,
+        "language": language
+    })
 
     st.session_state.report = simplify_policy_terms(str(result))
+
 
 # ---------------------------
 # DISPLAY REPORT
@@ -183,17 +198,18 @@ if st.session_state.report:
     st.subheader("📘 Policy Summary")
     st.write(st.session_state.report)
 
+
 # ---------------------------
-# 🧾 POLICY INSIGHTS (REPLACES LAB ANALYZER)
+# POLICY INSIGHTS
 # ---------------------------
 if st.session_state.raw_text:
     clauses = extract_policy_clauses(st.session_state.raw_text)
 
     if clauses:
-        st.subheader("🧾 Key Policy Sections Found")
-
+        st.subheader("🧾 Key Policy Sections")
         for c in clauses:
             st.markdown(f"- 📌 {c}")
+
 
 # ---------------------------
 # CHAT
@@ -202,7 +218,7 @@ if st.session_state.vectordb:
 
     st.subheader("💬 Ask About Policy")
 
-    user_input = st.text_input("Ask your question")
+    user_input = st.text_input("Ask question")
 
     if st.button("Ask") and user_input:
 
@@ -212,7 +228,7 @@ if st.session_state.vectordb:
         qa_prompt = ChatPromptTemplate.from_template("""
 You are an insurance expert.
 
-Answer ONLY from the policy context.
+Answer ONLY from context.
 
 Context:
 {context}
@@ -228,17 +244,24 @@ Question:
             "input": user_input
         })
 
-        answer = simplify_policy_terms(str(answer))
+        st.write("🤖", simplify_policy_terms(str(answer)))
 
-        st.write("🤖", answer)
 
 # ---------------------------
-# PDF EXPORT
+# PDF EXPORT (WITH HINDI SUPPORT)
 # ---------------------------
 def generate_pdf(report):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer)
     styles = getSampleStyleSheet()
+
+    custom_style = ParagraphStyle(
+        name="Custom",
+        parent=styles["Normal"],
+        fontName=HINDI_FONT,
+        fontSize=11,
+        leading=14
+    )
 
     content = [
         Paragraph("Insurance Policy Summary", styles["Title"]),
@@ -246,8 +269,9 @@ def generate_pdf(report):
     ]
 
     for line in report.split("\n"):
-        content.append(Paragraph(line, styles["Normal"]))
-        content.append(Spacer(1, 5))
+        if line.strip():
+            content.append(Paragraph(line, custom_style))
+            content.append(Spacer(1, 5))
 
     doc.build(content)
     buffer.seek(0)
